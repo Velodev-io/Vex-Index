@@ -1,0 +1,105 @@
+[
+  {
+    "_group": "keyword-heavy (FTS5 dominant)",
+    "query": "WebSocket connection manager",
+    "expected_file_fragments": ["ws.py"],
+    "expected_name_fragments": ["ConnectionManager"]
+  },
+  {
+    "query": "vector store upsert embedding",
+    "expected_file_fragments": ["vector.py"],
+    "expected_name_fragments": ["VectorStore", "upsert"]
+  },
+  {
+    "query": "delete older than cutoff datetime",
+    "expected_file_fragments": ["vector.py"],
+    "expected_name_fragments": ["delete_older_than"]
+  },
+  {
+    "query": "context event source app session user",
+    "expected_file_fragments": [],
+    "expected_name_fragments": ["ContextEvent"]
+  },
+  {
+    "query": "FastAPI router websocket broadcast",
+    "expected_file_fragments": ["ws.py"],
+    "expected_name_fragments": ["broadcast"]
+  },
+  {
+    "query": "qdrant search query points cosine",
+    "expected_file_fragments": ["vector.py"],
+    "expected_name_fragments": ["search", "VectorStore"]
+  },
+  {
+    "query": "asyncio to_thread sync wrapper",
+    "expected_file_fragments": ["vector.py"],
+    "expected_name_fragments": []
+  },
+  {
+    "query": "pydantic settings base url model config",
+    "expected_file_fragments": [],
+    "expected_name_fragments": []
+  },
+
+  {
+    "_group": "semantic/intent (vector expected to outperform FTS5)",
+    "query": "how to protect data at rest using symmetric encryption with a master key",
+    "expected_file_fragments": ["encryption.py"],
+    "expected_name_fragments": ["EncryptionService", "LocalKEKProvider", "encrypt_envelope"]
+  },
+  {
+    "query": "gracefully handle a disconnected WebSocket client without crashing",
+    "expected_file_fragments": ["ws.py"],
+    "expected_name_fragments": ["broadcast", "disconnect"]
+  },
+  {
+    "query": "remove old events and reclaim disk space",
+    "expected_file_fragments": ["episodic.py"],
+    "expected_name_fragments": ["prune_expired_vault_data"]
+  },
+  {
+    "query": "bulk write encrypted data and track it in a manifest",
+    "expected_file_fragments": ["manager.py"],
+    "expected_name_fragments": ["flush", "VaultManager"]
+  },
+  {
+    "query": "check if the database and vector store are live",
+    "expected_file_fragments": ["health.py"],
+    "expected_name_fragments": ["health", "stats"]
+  },
+  {
+    "query": "combine keyword and semantic search results with rank fusion",
+    "expected_file_fragments": ["search.py"],
+    "expected_name_fragments": ["hybrid_search", "HybridRetrieval"]
+  },
+  {
+    "query": "extract named entities and their relationships from an event",
+    "expected_file_fragments": ["extractor.py"],
+    "expected_name_fragments": ["EntityExtractor", "extract"]
+  },
+  {
+    "query": "avoid storing duplicate events with the same content and timestamp",
+    "expected_file_fragments": ["episodic.py"],
+    "expected_name_fragments": ["deduplicate_episodes"]
+  },
+  {
+    "query": "assign project identifiers to sessions recorded without a project",
+    "expected_file_fragments": ["episodic.py"],
+    "expected_name_fragments": ["retrofit_project_ids"]
+  },
+  {
+    "query": "generate a 256-bit AES key and store it securely on disk",
+    "expected_file_fragments": ["encryption.py"],
+    "expected_name_fragments": ["LocalKEKProvider", "get_kek"]
+  },
+  {
+    "query": "filter context events by date range and source application",
+    "expected_file_fragments": ["search.py"],
+    "expected_name_fragments": ["get_filtered_events", "HybridRetrieval"]
+  },
+  {
+    "query": "fallback to chronological order when no search results match",
+    "expected_file_fragments": ["search.py"],
+    "expected_name_fragments": ["hybrid_search"]
+  }
+]

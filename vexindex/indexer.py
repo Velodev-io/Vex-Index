@@ -611,7 +611,7 @@ async def index_single_file(conn: aiosqlite.Connection, project_id: str, file_pa
         return False
         
     try:
-        file_size = os.path.getsize(file_path)
+        file_size = await asyncio.to_thread(os.path.getsize, file_path)
         max_size = settings.VEXINDEX_MAX_FILE_SIZE_KB * 1024
         if file_size > max_size:
             logger.warning(f"Skipping file {file_path} exceeding size limit ({file_size} > {max_size} bytes)")
@@ -722,7 +722,8 @@ async def index_project(
     Crawls project path, skip matches in settings, indexes added/modified files.
     """
     root_path = os.path.abspath(os.path.expanduser(root_path))
-    if not os.path.exists(root_path):
+    exists = await asyncio.to_thread(os.path.exists, root_path)
+    if not exists:
         return
         
     skip_dirs = settings.skip_dirs_set

@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 _index_status: dict[str, dict] = {}
 
 async def run_index_task(project_id: str, root_path: str, conn):
+    logger.info(f"Indexing started for project {project_id} at {root_path}")
     _index_status[project_id] = {
         "project_id": project_id,
         "status": "indexing",
@@ -57,6 +58,7 @@ async def run_index_task(project_id: str, root_path: str, conn):
         
     try:
         await index_project(conn, project_id, root_path, on_progress)
+        logger.info(f"Indexing completed for project {project_id}")
     except Exception as e:
         logger.exception(f"Background indexing error for {project_id}: {e}")
     finally:
@@ -90,8 +92,14 @@ async def lifespan(app: FastAPI):
     yield
     
     # 3. Shutdown: Cancel all watchtasks, close DB
+    tasks_to_await = []
     for pid in list(_watcher_tasks.keys()):
+        task = _watcher_tasks.get(pid)
         stop_watcher(pid)
+        if task:
+            tasks_to_await.append(task)
+    if tasks_to_await:
+        await asyncio.gather(*tasks_to_await, return_exceptions=True)
     await conn.close()
     logger.info("VexIndex: shutdown completed.")
 
@@ -129,6 +137,7 @@ async def create_project_route(payload: ProjectCreate, background_tasks: Backgro
     project_id = str(uuid.uuid4())
     try:
         await insert_project(conn, project_id, payload.name, root_path)
+        logger.info(f"Project registered: {payload.name} (id: {project_id}, path: {root_path})")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to register project (perhaps root path is already registered): {e}")
         
@@ -206,7 +215,14 @@ async def get_index_status_route(project_id: str):
         "indexed_files": 0,
         "total_files": 0
     })
-    return status_info
+    
+    from vexindex.watcher import get_watcher_status
+    w_status = get_watcher_status(project_id)
+    
+    response_data = dict(status_info)
+    response_data["watcher_status"] = w_status.get("status")
+    response_data["watcher_error"] = w_status.get("error")
+    return response_data
 
 @app.post("/search", response_model=list[SearchResult])
 async def search_route(payload: SearchRequest):

@@ -22,7 +22,7 @@ async def dummy_awatch(*args, **kwargs):
         while True:
             await asyncio.sleep(0.01)
     except asyncio.CancelledError:
-        pass
+        raise
 
 watchfiles.awatch = dummy_awatch
 watchfiles.main.awatch = dummy_awatch
@@ -43,14 +43,30 @@ from vexindex.main import app
 @pytest.fixture(scope="module", autouse=True)
 def cleanup():
     yield
+    from vexindex.vector import vector_store
+    if hasattr(vector_store, "_client") and vector_store._client is not None:
+        try:
+            vector_store._client.close()
+        except Exception:
+            pass
+        vector_store._client = None
     settings.VEXINDEX_DB_PATH = original_db_path
     settings.VEXINDEX_VECTOR_PATH = original_vector_path
     # Cleanup the temp directory
     shutil.rmtree(temp_dir, ignore_errors=True)
 
+import pytest_asyncio
+
+@pytest_asyncio.fixture
+async def client():
+    async with app.router.lifespan_context(app):
+        from httpx import AsyncClient, ASGITransport
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as c:
+            yield c
+
 
 @pytest.mark.asyncio
-async def test_project_lifecycle():
+async def test_project_lifecycle(client):
     # Create a temporary directory to act as a codebase project
     with tempfile.TemporaryDirectory() as project_dir:
         # Create a sample python file in the directory
@@ -71,99 +87,96 @@ async def test_project_lifecycle():
         mock_delete = patch("vexindex.vector.vector_store.delete_chunks_for_file", new_callable=AsyncMock, return_value=None)
         mock_search_vec = patch("vexindex.vector.vector_store.search_vectors", new_callable=AsyncMock, return_value=[])
 
-        from httpx import AsyncClient, ASGITransport
         with mock_embed, mock_upsert, mock_delete, mock_search_vec:
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-                # 1. Register project
-                response = await client.post(
-                    "/projects",
-                    json={"name": "Test project", "root_path": project_dir}
-                )
-                assert response.status_code == 201
-                data = response.json()
-                assert "id" in data
-                assert data["name"] == "Test project"
-                project_id = data["id"]
-                
-                # Wait for background task indexer to complete (yield to the event loop)
-                for _ in range(20):
-                    status_response = await client.get(f"/index/status/{project_id}")
-                    assert status_response.status_code == 200
-                    status_data = status_response.json()
-                    assert status_data["project_id"] == project_id
-                    if status_data["status"] == "idle":
-                        break
-                    await asyncio.sleep(0.1)
-                else:
-                    pytest.fail("Indexing task did not finish in time")
-                
-                # 3. List projects
-                list_response = await client.get("/projects")
-                assert list_response.status_code == 200
-                projects = list_response.json()
-                assert len(projects) > 0
-                assert any(p["id"] == project_id for p in projects)
-                
-                # 4. Search
-                search_response = await client.post(
-                    "/search",
-                    json={"query": "connect", "project_id": project_id}
-                )
-                assert search_response.status_code == 200
-                results = search_response.json()
-                assert len(results) > 0
-                assert results[0]["chunk_type"] == "function"
-                assert results[0]["name"] == "connect"
-                
-                # 5. Delete project
-                delete_response = await client.delete(f"/projects/{project_id}")
-                assert delete_response.status_code == 200
-                
-                # Verify deleted
-                verify_response = await client.get("/projects")
-                assert verify_response.status_code == 200
-                projects_after = verify_response.json()
-                assert not any(p["id"] == project_id for p in projects_after)
+            # 1. Register project
+            response = await client.post(
+                "/projects",
+                json={"name": "Test project", "root_path": project_dir}
+            )
+            assert response.status_code == 201
+            data = response.json()
+            assert "id" in data
+            assert data["name"] == "Test project"
+            project_id = data["id"]
+            
+            # Wait for background task indexer to complete (yield to the event loop)
+            for _ in range(20):
+                status_response = await client.get(f"/index/status/{project_id}")
+                assert status_response.status_code == 200
+                status_data = status_response.json()
+                assert status_data["project_id"] == project_id
+                if status_data["status"] == "idle":
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                pytest.fail("Indexing task did not finish in time")
+            
+            # 3. List projects
+            list_response = await client.get("/projects")
+            assert list_response.status_code == 200
+            projects = list_response.json()
+            assert len(projects) > 0
+            assert any(p["id"] == project_id for p in projects)
+            
+            # 4. Search
+            search_response = await client.post(
+                "/search",
+                json={"query": "connect", "project_id": project_id}
+            )
+            assert search_response.status_code == 200
+            results = search_response.json()
+            assert len(results) > 0
+            assert results[0]["chunk_type"] == "function"
+            assert results[0]["name"] == "connect"
+            
+            # 5. Delete project
+            delete_response = await client.delete(f"/projects/{project_id}")
+            assert delete_response.status_code == 200
+            
+            # Verify deleted
+            verify_response = await client.get("/projects")
+            assert verify_response.status_code == 200
+            projects_after = verify_response.json()
+            assert not any(p["id"] == project_id for p in projects_after)
+
 
 @pytest.mark.asyncio
-async def test_search_endpoint_alpha():
+async def test_search_endpoint_alpha(client):
     from unittest.mock import patch, AsyncMock
-    from httpx import AsyncClient, ASGITransport
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        mock_results = [{
-            "chunk_id": "test-id",
-            "file_path": "test.py",
-            "start_line": 1,
-            "end_line": 2,
-            "chunk_type": "class",
-            "name": "Test",
-            "content": "class Test",
-            "rank": 0.9
-        }]
-        with patch("vexindex.main.search_hybrid", new=AsyncMock(return_value=mock_results)) as mock_search:
-            # Test default / no alpha
-            response = await client.post("/search", json={"query": "test_query", "project_id": "some-id"})
-            assert response.status_code == 200
-            mock_search.assert_called_once_with(
-                conn=app.state.db,
-                query="test_query",
-                project_id="some-id",
-                limit=10,
-                alpha=None
-            )
-            
-            mock_search.reset_mock()
-            
-            # Test with custom alpha
-            response = await client.post("/search", json={"query": "test_query", "project_id": "some-id", "alpha": 0.45, "limit": 5})
-            assert response.status_code == 200
-            mock_search.assert_called_once_with(
-                conn=app.state.db,
-                query="test_query",
-                project_id="some-id",
-                limit=5,
-                alpha=0.45
-            )
+    mock_results = [{
+        "chunk_id": "test-id",
+        "file_path": "test.py",
+        "start_line": 1,
+        "end_line": 2,
+        "chunk_type": "class",
+        "name": "Test",
+        "content": "class Test",
+        "rank": 0.9
+    }]
+    with patch("vexindex.main.search_hybrid", new=AsyncMock(return_value=mock_results)) as mock_search:
+        # Test default / no alpha
+        response = await client.post("/search", json={"query": "test_query", "project_id": "some-id"})
+        assert response.status_code == 200
+        mock_search.assert_called_once_with(
+            conn=app.state.db,
+            query="test_query",
+            project_id="some-id",
+            limit=10,
+            alpha=None
+        )
+        
+        mock_search.reset_mock()
+        
+        # Test with custom alpha
+        response = await client.post("/search", json={"query": "test_query", "project_id": "some-id", "alpha": 0.45, "limit": 5})
+        assert response.status_code == 200
+        mock_search.assert_called_once_with(
+            conn=app.state.db,
+            query="test_query",
+            project_id="some-id",
+            limit=5,
+            alpha=0.45
+        )
 
 
 @pytest.mark.asyncio
@@ -225,31 +238,39 @@ async def test_watcher_retry_on_exception():
     watcher_should_fail = True
     
     from unittest.mock import AsyncMock, patch
-    from vexindex.watcher import watch_project
+    from vexindex.watcher import watch_project, get_watcher_status
+    
+    original_sleep = asyncio.sleep
+    async def mock_sleep_side_effect(delay):
+        await original_sleep(min(delay, 0.001))
     
     # Mock asyncio.sleep so we don't actually wait in tests
     with patch("vexindex.watcher.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-        try:
-            conn_mock = AsyncMock()
-            with tempfile.TemporaryDirectory() as watch_dir:
-                # Start watch_project in a task
-                task = asyncio.create_task(watch_project("test-project", watch_dir, conn_mock))
-                
+        mock_sleep.side_effect = mock_sleep_side_effect
+        conn_mock = AsyncMock()
+        with tempfile.TemporaryDirectory() as watch_dir:
+            # Start watch_project in a task
+            task = asyncio.create_task(watch_project("test-project", watch_dir, conn_mock))
+            try:
                 # Give it a small event loop turn to run
                 await asyncio.sleep(0.05)
                 
                 # Verify that an error occurred, leading to a sleep retry call
                 assert watcher_call_count >= 1
-                mock_sleep.assert_called_with(1.0)
+                assert any(call[0][0] == 1.0 for call in mock_sleep.call_args_list)
                 
+                # Verify status reflects failure
+                w_status = get_watcher_status("test-project")
+                assert w_status["status"] == "failed"
+                assert "Simulated watchfiles exception" in w_status["error"]
+            finally:
                 # Cancel task to clean up
                 task.cancel()
                 try:
                     await task
                 except asyncio.CancelledError:
                     pass
-        finally:
-            watcher_should_fail = False
+                watcher_should_fail = False
 
 
 

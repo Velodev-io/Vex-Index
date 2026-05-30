@@ -12,6 +12,13 @@ from vexindex.config import settings
 logger = logging.getLogger(__name__)
 
 _watcher_tasks: dict[str, asyncio.Task] = {}
+_watcher_status: dict[str, dict] = {}
+
+def get_watcher_status(project_id: str) -> dict:
+    """
+    Returns the current watcher status, error state, and retry context for a project.
+    """
+    return _watcher_status.get(project_id, {"status": "idle", "error": None})
 
 async def watch_project(project_id: str, root_path: str, conn: aiosqlite.Connection):
     """
@@ -28,9 +35,11 @@ async def watch_project(project_id: str, root_path: str, conn: aiosqlite.Connect
     while True:
         try:
             logger.info(f"Watcher: starting watch task for project {project_id} at {root_path}")
+            _watcher_status[project_id] = {"status": "running", "error": None}
             async for changes in awatch(root_path, watch_filter=watch_filter):
                 # Reset retry delay on successful events
                 retry_delay = 1.0
+                _watcher_status[project_id] = {"status": "running", "error": None}
                 for change_type, file_path in changes:
                     # Check if file is inside a skip directory
                     parts = Path(file_path).parts
@@ -38,7 +47,8 @@ async def watch_project(project_id: str, root_path: str, conn: aiosqlite.Connect
                         continue
                         
                     if change_type in (Change.added, Change.modified):
-                        if not os.path.isfile(file_path):
+                        is_file = await asyncio.to_thread(os.path.isfile, file_path)
+                        if not is_file:
                             continue
                         indexed = await index_single_file(conn, project_id, file_path)
                         if indexed:
@@ -52,8 +62,10 @@ async def watch_project(project_id: str, root_path: str, conn: aiosqlite.Connect
                         
         except asyncio.CancelledError:
             logger.info(f"Watcher: watch task cancelled for project {project_id}")
+            _watcher_status.pop(project_id, None)
             break
         except Exception as e:
+            _watcher_status[project_id] = {"status": "failed", "error": str(e)}
             logger.exception(f"Watcher: error in watch loop for project {project_id}: {e}")
             logger.info(f"Watcher: retrying watch loop for project {project_id} in {retry_delay}s...")
             await asyncio.sleep(retry_delay)
@@ -70,3 +82,4 @@ def stop_watcher(project_id: str):
     task = _watcher_tasks.pop(project_id, None)
     if task:
         task.cancel()
+    _watcher_status.pop(project_id, None)

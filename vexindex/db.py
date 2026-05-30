@@ -236,14 +236,17 @@ async def search_fts(conn: aiosqlite.Connection, query: str, project_id: Optiona
     if not words:
         return []
 
+    # Double-quote individual words to prevent collisions with FTS5 operators/keywords (AND, OR, NOT, NEAR)
+    quoted_words = [f'"{w}"' for w in words]
+
     # Two-tier FTS5 query strategy:
     # ≤ 4 tokens  → NEAR(w1 w2 ..., 5)  for proximity-aware matching (high precision)
     # > 4 tokens  → phrase for first 4 + OR for the rest  (high recall, still ranked by phrase hits)
     if len(words) <= 4:
-        fts_query = f'NEAR({" ".join(words)}, 5)'
+        fts_query = f'NEAR({" ".join(quoted_words)}, 5)'
     else:
         phrase_part = '"' + " ".join(words[:4]) + '"'
-        extra_part  = " OR ".join(words[4:])
+        extra_part  = " OR ".join(quoted_words[4:])
         fts_query   = f"{phrase_part} OR {extra_part}"
 
     sql = """

@@ -36,6 +36,8 @@ class IndexStatusResponse(BaseModel):
     status: Literal["idle", "indexing"]
     indexed_files: int
     total_files: int
+    watcher_status: Optional[str] = None
+    watcher_error: Optional[str] = None
 
 
 class SymbolDefinitionResponse(BaseModel):
